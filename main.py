@@ -1,8 +1,6 @@
 import os
-import cgi
-import upload_file
 import re
-
+from datetime import datetime
 
 
 def run_server(name):
@@ -12,13 +10,18 @@ def run_server(name):
 
     hostName = "localhost"
     serverPort = 8080
-    max_blank_lines_for_end_of_body = 3
 
     class ECHB_file_server(BaseHTTPRequestHandler):
 
+        max_blank_lines_for_end_of_body = 3
+        file_ending_string = ".csv"
+        volunteer_signin_file_base_name = "volunteerHours"
+        packages_path = r"packages/"
+        not_applicable_char = "-"
+
         def __init__(self,var1,var2,var3):
             # initialise fields
-            self.packages_path = r"packages/"
+            print("initialising server")
 
             # make directory of files
             file_names = self.list_files_for_download()
@@ -29,36 +32,53 @@ def run_server(name):
             super().__init__(var1,var2,var3)
 
         def do_GET(self):
-            domain = self.parse_and_direct(self.path)
-            if domain.__len__() > 0 \
+            path = self.parse_and_direct(self.path)
+            if path.__len__() > 0 \
                     and not self.post_called \
-                    and not domain == "favicon.ico":
+                    and not path == "favicon.ico":
 
-               if domain == "upload":
-                   self.send_response(200)
-                   self.send_header("Content-type", "text/html")
-                   self.end_headers()
-                   with open("html/upload.html", "r") as upload_html_text:
-                       self.wfile.write(bytes(upload_html_text.read(), "utf-8"))
-               else:
+                if path == "upload":
+                    self.send_response(200)
+                    self.send_header("Content-type", "text/html")
+                    self.end_headers()
+                    with open("html/upload.html", "r") as upload_html_text:
+                        self.wfile.write(bytes(upload_html_text.read(), "utf-8"))
+                elif path == "files":
+                    self.send_response(200)
+                    self.send_header("Content-type", "text/html")
+                    self.end_headers()
+                    with open("html/files.html", "r") as index_html_text:
+                        self.wfile.write(bytes(index_html_text.read(), "utf-8"))
+                        self.wfile.write(bytes(self.packages_directory_content_HTML, "utf-8"))
+                        self.wfile.write(bytes("</body>", "utf-8"))
+                        self.wfile.write(bytes("</html>", "utf-8"))
+                elif path.__contains__("normalize.css"):
+                    with open("css/normalize.css" ,"rb") as file_stream:
+                        lines = file_stream.readlines()
+                        for line in lines:
+                            self.wfile.write(line)
+                else: # we request a file
                     self.send_response(200)
                     self.send_header("Content-type", "text")
-                    self.send_header("Content-Disposition", "attachment; filename=%s" % domain)
+                    self.send_header("Content-Disposition", "attachment; filename=%s" % path)
                     self.end_headers()
-                    with open(self.packages_path + domain,"rb") as file_stream:
-                            lines = file_stream.readlines()
-                            for line in lines:
-                                print(line)
-                                self.wfile.write(line)
-            else: #if no resource is requested
-               self.send_response(200)
-               self.send_header("Content-type", "text/html")
-               self.end_headers()
-               with open("html/index.html", "r") as index_html_text:
-                   self.wfile.write(bytes(index_html_text.read(), "utf-8"))
-                   self.wfile.write(bytes(self.packages_directory_content_HTML, "utf-8"))
-                   self.wfile.write(bytes("</body>","utf-8"))
-                   self.wfile.write(bytes("</html>","utf-8"))
+                    with open(self.packages_path + path,"rb") as file_stream:
+                        lines = file_stream.readlines()
+                        for line in lines:
+                            print(line)
+                            self.wfile.write(line)
+            else: #no resources requested. Direct to index
+                self.send_response(200)
+                self.send_header("Content-type", "text/html")
+                self.end_headers()
+                volunteers_present_html = self.show_staff_present()
+                with open("html/index.html", "r") as index_html_text:
+                    self.wfile.write(bytes(index_html_text.read(), "utf-8"))
+                    self.wfile.write(bytes(volunteers_present_html, "utf-8"))
+                    self.wfile.write(bytes("</body>", "utf-8"))
+                    self.wfile.write(bytes("</html>", "utf-8"))
+
+
             self.post_called = False
 
         def do_POST(self):
@@ -106,7 +126,7 @@ def run_server(name):
                         continue
                     elif line == b"":
                         num_blank_lines_crossed += 1
-                        if num_blank_lines_crossed == max_blank_lines_for_end_of_body:
+                        if num_blank_lines_crossed == self.max_blank_lines_for_end_of_body:
                             break
                     if is_empty_line_crossed:
                         temp_file.write(line.decode())
@@ -144,6 +164,32 @@ def run_server(name):
         def parse_and_direct(self, path_str):
             dirs = path_str.split("/")
             return dirs[len(dirs)-1]
+
+        def show_staff_present(self):
+            date_string = datetime.now().strftime("_%Y_%m_%d")
+            directory = self.packages_path
+            base_file_name = self.volunteer_signin_file_base_name
+            file_ending = self.file_ending_string
+            signed_in_vols = "<table>\r\n" \
+                             "  <tr>\r\n" \
+                             "      <th>first name:</th>\r\n" \
+                             "      <th>last name:</th>\r\n" \
+                             "      <th>entry time:</th>\r\n" \
+                             "      <th>area:</th>\r\n" \
+                             "  </tr>\r\n"
+
+            with open(directory + base_file_name + date_string + file_ending, "rt") as file:
+                for line in file:
+                    vals = line.split(",")
+                    if vals[3] == self.not_applicable_char:
+                        signed_in_vols += "<tr>\r\n" \
+                                        "   <td>" + vals[0] + "</td>\r\n" \
+                                        "   <td>" + vals[1] + "</td>\r\n" \
+                                        "   <td>" + vals[2] + "</td>\r\n" \
+                                        "   <td>" + vals[4] + "</td>\r\n" \
+                                        "</tr>\r\n"
+                signed_in_vols += "</table>"
+                return signed_in_vols
 
     if __name__ == "__main__":
 
